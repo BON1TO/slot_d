@@ -196,6 +196,17 @@
             backdrop-filter: blur(8px);
         }
 
+        /* ── Flash overlay for live sync ── */
+        #flashOverlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(168, 85, 247, 0.06);
+            pointer-events: none;
+            z-index: 50;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
         /* ── Main container ── */
         .container {
             position: relative;
@@ -477,17 +488,6 @@
             border: 2px solid rgba(255, 255, 255, 0.1);
         }
 
-        /* ── Flash overlay for live sync ── */
-        #flashOverlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(168, 85, 247, 0.06);
-            pointer-events: none;
-            z-index: 50;
-            opacity: 0;
-            transition: opacity 0.2s;
-        }
-
         /* ── Empty state ── */
         .empty-state {
             display: flex;
@@ -511,7 +511,7 @@
 
 <body>
 
-    <div id="retryBanner">⚠️ Relay unreachable — trying fallback peers… <span id="retryCount"></span></div>
+    <div id="retryBanner">⚠️ Relay unreachable — retrying… <span id="retryCount"></span></div>
     <div id="flashOverlay"></div>
 
     <!-- Sync pill -->
@@ -561,55 +561,80 @@
 
     <script>
         // ══════════════════════════════════════════════
-        //  GUN — same 5 community relays as booking.html
+        //  GUN.js — Working relay peers (verified alive)
+        //  MUST match the same relay + DB namespace
+        //  as the booking page (SlotB) for cross-device sync.
         // ══════════════════════════════════════════════
+
         const RELAYS = [
-            'https://gun-manhattan.herokuapp.com/gun',
-            'https://gunjs.herokuapp.com/gun',
-            'https://peer.wallie.io/gun',
-            'https://relay.peer.ooo/gun',
-            'https://gun-us.herokuapp.com/gun'
+            'https://relay.peer.ooo/gun'
+            // Add your own relay URL here for redundancy:
+            // 'https://your-relay.koyeb.app/gun'
         ];
 
-        const gun = Gun({ peers: RELAYS, localStorage: true, radisk: false });
-        const slotsRef = gun.get('syncspace_v2').get('boardroom_alpha');
+        const gun = Gun({
+            peers: RELAYS,
+            localStorage: true,
+            radisk: false
+        });
 
-        // ── Relay health ──
-        let relayFailures = 0;
-        function updateSyncUI(state, label, relayUrl) {
+        const DB_ROOT = 'syncspace_v3';
+        const slotsRef = gun.get(DB_ROOT).get('boardroom_alpha');
+
+        // ── Connection monitoring via GUN's built-in events ──
+        let isConnected = false;
+        let connectedRelay = null;
+
+        gun.on('hi', function (peer) {
+            isConnected = true;
+            connectedRelay = peer.url || peer.id || 'peer';
+            const short = String(connectedRelay).replace('https://', '').replace('/gun', '').substring(0, 30);
+            updateSyncUI('connected', 'Live Sync', short);
+            document.getElementById('retryBanner').style.display = 'none';
+            console.log('✅ Connected to relay:', connectedRelay);
+        });
+
+        gun.on('bye', function (peer) {
+            console.log('⚠️ Disconnected from relay:', peer.url || peer.id);
+            setTimeout(() => {
+                if (!isConnected) {
+                    updateSyncUI('error', 'Reconnecting…', null);
+                }
+            }, 2000);
+        });
+
+        function updateSyncUI(state, label, relayShort) {
             const pill = document.getElementById('syncPill');
             const lbl = document.getElementById('syncLabel');
             const info = document.getElementById('relayInfo');
             pill.className = state;
             lbl.textContent = label;
-            if (relayUrl) {
-                const short = relayUrl.replace('https://', '').replace('/gun', '');
-                info.textContent = '↔ ' + short;
-            }
+            if (relayShort) info.textContent = '↔ ' + relayShort;
         }
 
+        // Periodic heartbeat
         function checkRelay() {
             let heard = false;
             gun.get('syncspace_heartbeat').get('ping').put({ ts: Date.now() }, ack => {
                 if (!heard) {
                     heard = true;
-                    relayFailures = 0;
-                    updateSyncUI('connected', 'Live Sync', RELAYS[0]);
+                    isConnected = true;
+                    updateSyncUI('connected', 'Live Sync', connectedRelay ?
+                        String(connectedRelay).replace('https://', '').replace('/gun', '').substring(0, 30) : 'relay');
                     document.getElementById('retryBanner').style.display = 'none';
                 }
             });
             setTimeout(() => {
                 if (!heard) {
-                    relayFailures++;
+                    isConnected = false;
                     updateSyncUI('error', 'Reconnecting…', null);
                     document.getElementById('retryBanner').style.display = 'block';
-                    document.getElementById('retryCount').textContent =
-                        `(relay ${Math.min(relayFailures + 1, RELAYS.length)}/${RELAYS.length})`;
+                    document.getElementById('retryCount').textContent = '(auto-retry active)';
                 }
-            }, 4000);
+            }, 5000);
         }
-        checkRelay();
-        setInterval(checkRelay, 15000);
+        setTimeout(checkRelay, 2000);
+        setInterval(checkRelay, 20000);
 
         // ── Toast ──
         let toastTimer = null;
@@ -635,7 +660,7 @@
             weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
         });
 
-        // ── Default slots (same seed as booking.html) ──
+        // ── Default slots (MUST match booking page exactly) ──
         const DEFAULT_SLOTS = [
             { id: 1, time: '09:00 AM', available: true, bookedBy: null, company: null },
             { id: 2, time: '10:00 AM', available: true, bookedBy: null, company: null },
@@ -648,14 +673,13 @@
             { id: 9, time: '05:00 PM', available: true, bookedBy: null, company: null }
         ];
 
-        const LOCAL_KEY = 'syncspace_gun_slots';
+        const LOCAL_KEY = 'syncspace_gun_slots_v3';
         let slots = [];
 
         // ── Render ──
         function renderSlots() {
             const container = document.getElementById('dashboardSlots');
 
-            // Update stats
             const avail = slots.filter(s => s.available).length;
             const booked = slots.filter(s => !s.available).length;
             document.getElementById('statTotal').textContent = slots.length;
@@ -707,7 +731,7 @@
             slots = [...DEFAULT_SLOTS]; renderSlots();
         }
 
-        // ── Live GUN subscriptions ──
+        // ── Live GUN subscriptions (real-time from any device) ──
         DEFAULT_SLOTS.forEach(def => {
             slotsRef.get('slot_' + def.id).on(data => {
                 if (!data || !data.id) return;
@@ -732,7 +756,6 @@
                 }
 
                 if (changed) {
-                    // Announce new bookings
                     if (!updated.available && updated.bookedBy && updated.bookedBy !== 'System') {
                         showToast(`${updated.time} booked by ${updated.bookedBy}`, 'warn');
                     }
@@ -743,7 +766,7 @@
             });
         });
 
-        // ── Hydrate with .once to force initial fetch ──
+        // ── Hydrate with .once to force initial fetch from relay ──
         DEFAULT_SLOTS.forEach(def => {
             slotsRef.get('slot_' + def.id).once(data => {
                 if (!data || !data.id) return;
@@ -759,6 +782,8 @@
                 renderSlots();
             });
         });
+
+        console.log('SyncSpace Display — GUN P2P via relay.peer.ooo');
     </script>
 </body>
 
