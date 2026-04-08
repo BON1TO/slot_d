@@ -573,14 +573,33 @@
             // 'https://your-relay.koyeb.app/gun'
         ];
 
+        // ── Default slots (MUST match booking page exactly) ──
+        const DEFAULT_SLOTS = [
+            { id: 1, time: '09:00 AM', available: true, bookedBy: null, company: null },
+            { id: 2, time: '10:00 AM', available: true, bookedBy: null, company: null },
+            { id: 3, time: '11:00 AM', available: false, bookedBy: 'System', company: 'Maintenance' },
+            { id: 4, time: '12:00 PM', available: true, bookedBy: null, company: null },
+            { id: 5, time: '01:00 PM', available: true, bookedBy: null, company: null },
+            { id: 6, time: '02:00 PM', available: false, bookedBy: 'System', company: 'Maintenance' },
+            { id: 7, time: '03:00 PM', available: true, bookedBy: null, company: null },
+            { id: 8, time: '04:00 PM', available: true, bookedBy: null, company: null },
+            { id: 9, time: '05:00 PM', available: true, bookedBy: null, company: null }
+        ];
+
         const gun = Gun({
-            peers: RELAYS,
-            localStorage: false,
-            radisk: false
+            peers: RELAYS
         });
 
         const DB_ROOT = 'syncspace_v3';
         const slotsRef = gun.get(DB_ROOT).get('boardroom_alpha');
+
+        DEFAULT_SLOTS.forEach(slot => {
+            slotsRef.get('slot_' + slot.id).once(data => {
+                if (!data) {
+                    slotsRef.get('slot_' + slot.id).put(slot);
+                }
+            });
+        });
 
         // ── Connection monitoring via GUN's built-in events ──
         let isConnected = false;
@@ -661,18 +680,6 @@
             weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
         });
 
-        // ── Default slots (MUST match booking page exactly) ──
-        const DEFAULT_SLOTS = [
-            { id: 1, time: '09:00 AM', available: true, bookedBy: null, company: null },
-            { id: 2, time: '10:00 AM', available: true, bookedBy: null, company: null },
-            { id: 3, time: '11:00 AM', available: false, bookedBy: 'System', company: 'Maintenance' },
-            { id: 4, time: '12:00 PM', available: true, bookedBy: null, company: null },
-            { id: 5, time: '01:00 PM', available: true, bookedBy: null, company: null },
-            { id: 6, time: '02:00 PM', available: false, bookedBy: 'System', company: 'Maintenance' },
-            { id: 7, time: '03:00 PM', available: true, bookedBy: null, company: null },
-            { id: 8, time: '04:00 PM', available: true, bookedBy: null, company: null },
-            { id: 9, time: '05:00 PM', available: true, bookedBy: null, company: null }
-        ];
 
         const LOCAL_KEY = 'syncspace_gun_slots_v3';
         let slots = [];
@@ -790,7 +797,7 @@
                 try {
                     slots = JSON.parse(e.newValue);
                     renderSlots();
-                } catch(err) {}
+                } catch (err) { }
             }
         });
 
