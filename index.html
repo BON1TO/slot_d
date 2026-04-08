@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SyncSpace — Live Display Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" href="data:;base64,iVBORw0KGgo=">
     <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
     <style>
         * {
@@ -574,7 +575,7 @@
 
         const gun = Gun({
             peers: RELAYS,
-            localStorage: true,
+            localStorage: false,
             radisk: false
         });
 
@@ -781,6 +782,16 @@
                 localStorage.setItem(LOCAL_KEY, JSON.stringify(slots));
                 renderSlots();
             });
+        });
+
+        // ── Fallback for local testing (file:// origins share localStorage) ──
+        window.addEventListener('storage', e => {
+            if (e.key === LOCAL_KEY && e.newValue) {
+                try {
+                    slots = JSON.parse(e.newValue);
+                    renderSlots();
+                } catch(err) {}
+            }
         });
 
         console.log('SyncSpace Display — GUN P2P via relay.peer.ooo');
