@@ -628,29 +628,7 @@
             if (relayShort) info.textContent = '↔ ' + relayShort;
         }
 
-        // Periodic heartbeat
-        function checkRelay() {
-            let heard = false;
-            gun.get('syncspace_heartbeat').get('ping').put({ ts: Date.now() }, ack => {
-                if (!heard) {
-                    heard = true;
-                    isConnected = true;
-                    updateSyncUI('connected', 'Live Sync', connectedRelay ?
-                        String(connectedRelay).replace('https://', '').replace('/gun', '').substring(0, 30) : 'relay');
-                    document.getElementById('retryBanner').style.display = 'none';
-                }
-            });
-            setTimeout(() => {
-                if (!heard) {
-                    isConnected = false;
-                    updateSyncUI('error', 'Reconnecting…', null);
-                    document.getElementById('retryBanner').style.display = 'block';
-                    document.getElementById('retryCount').textContent = '(auto-retry active)';
-                }
-            }, 5000);
-        }
-        setTimeout(checkRelay, 2000);
-        setInterval(checkRelay, 20000);
+
 
         // ── Toast ──
         let toastTimer = null;
