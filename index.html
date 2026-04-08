@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SyncSpace — Live Display Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .bg-shape {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(120px);
+            z-index: 0;
+            animation: float 15s infinite alternate;
+        }
+
+        .shape1 {
+            width: 60vw;
+            height: 60vw;
+            background: rgba(99, 102, 241, 0.4);
+            top: -20%;
+            left: -20%;
+        }
+
+        .shape2 {
+            width: 50vw;
+            height: 50vw;
+            background: rgba(168, 85, 247, 0.4);
+            bottom: -20%;
+            right: -20%;
+            animation-delay: -5s;
+        }
+
+        .shape3 {
+            width: 40vw;
+            height: 40vw;
+            background: rgba(236, 72, 153, 0.3);
+            top: 20%;
+            left: 20%;
+            animation-delay: -10s;
+            animation-duration: 20s;
+        }
+
+        @keyframes float {
+            0% {
+                transform: translate(0, 0) scale(1)
+            }
+
+            100% {
+                transform: translate(80px, 80px) scale(1.1)
+            }
+        }
+
+        /* ── Sync pill ── */
+        #syncPill {
+            position: fixed;
+            top: 20px;
+            right: 24px;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 30px;
+            padding: 10px 20px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+            transition: all 0.4s ease;
+        }
+
+        #syncDot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #f59e0b;
+            transition: background 0.4s;
+        }
+
+        #syncPill.connected #syncDot {
+            background: #10b981;
+            animation: blink 1.5s infinite;
+        }
+
+        #syncPill.error #syncDot {
+            background: #ef4444;
+        }
+
+        #syncPill.connected {
+            border-color: rgba(16, 185, 129, 0.25);
+        }
+
+        #syncPill.error {
+            border-color: rgba(239, 68, 68, 0.25);
+        }
+
+        @keyframes blink {
+            0% {
+                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7)
+            }
+
+            70% {
+                box-shadow: 0 0 0 10px rgba(16, 185, 129, 0)
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0)
+            }
+        }
+
+        #syncLabel {
+            color: #cbd5e1;
+        }
+
+        /* ── Relay info ── */
+        #relayInfo {
+            position: fixed;
+            top: 58px;
+            right: 24px;
+            z-index: 100;
+            font-size: 0.7rem;
+            color: #475569;
+            text-align: right;
+        }
+
+        /* ── Toast ── */
+        #toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #f8fafc;
+            padding: 14px 24px;
+            border-radius: 14px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 200;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        #toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .toast-icon {
+            font-size: 1.2rem;
+        }
+
+        /* ── Retry banner ── */
+        #retryBanner {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(239, 68, 68, 0.12);
+            border-bottom: 1px solid rgba(239, 68, 68, 0.25);
+            color: #fca5a5;
+            font-size: 0.82rem;
+            text-align: center;
+            padding: 8px;
+            z-index: 300;
+            backdrop-filter: blur(8px);
+        }
+
+        /* ── Main container ── */
+        .container {
+            position: relative;
+            z-index: 1;
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(40px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 36px;
+            padding: 50px 60px;
+            width: 95%;
+            max-width: 1400px;
+            height: 90vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 40px 80px -20px rgba(0, 0, 0, 0.7), inset 0 1px 1px rgba(255, 255, 255, 0.1);
+        }
+
+        /* ── Header ── */
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-bottom: 40px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 30px;
+            flex-shrink: 0;
+        }
+
+        h1 {
+            font-size: 3.5rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            letter-spacing: -1.5px;
+            background: linear-gradient(135deg, #a855f7, #6366f1, #3b82f6);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: grad 5s ease infinite;
+            background-size: 200% 200%;
+        }
+
+        @keyframes grad {
+            0% {
+                background-position: 0% 50%
+            }
+
+            50% {
+                background-position: 100% 50%
+            }
+
+            100% {
+                background-position: 0% 50%
+            }
+        }
+
+        .live-badge {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 1.1rem;
+            color: #a855f7;
+            font-weight: 700;
+            background: rgba(168, 85, 247, 0.15);
+            padding: 12px 24px;
+            border-radius: 30px;
+            box-shadow: 0 4px 15px rgba(168, 85, 247, 0.2);
+            letter-spacing: 1.5px;
+            border: 1px solid rgba(168, 85, 247, 0.2);
+        }
+
+        .pulsing-dot {
+            width: 12px;
+            height: 12px;
+            background: #a855f7;
+            border-radius: 50%;
+            animation: pblink 1.5s infinite;
+        }
+
+        @keyframes pblink {
+            0% {
+                box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.6)
+            }
+
+            70% {
+                box-shadow: 0 0 0 10px rgba(168, 85, 247, 0)
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(168, 85, 247, 0)
+            }
+        }
+
+        /* ── Stats bar ── */
+        .stats-bar {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 24px;
+            flex-shrink: 0;
+        }
+
+        .stat-chip {
+            padding: 8px 18px;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            letter-spacing: 0.3px;
+        }
+
+        .stat-chip.avail {
+            background: rgba(16, 185, 129, 0.1);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        .stat-chip.booked {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+
+        .stat-chip.total {
+            background: rgba(99, 102, 241, 0.1);
+            color: #818cf8;
+            border: 1px solid rgba(99, 102, 241, 0.2);
+        }
+
+        /* ── Slot list ── */
+        .slots-list {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            flex-grow: 1;
+            overflow-y: auto;
+            padding-right: 16px;
+            padding-bottom: 20px;
+            transition: opacity 0.3s ease;
+        }
+
+        .slots-list::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .slots-list::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+        }
+
+        .slots-list::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+        }
+
+        /* ── Slot row ── */
+        .slot-row {
+            background: rgba(30, 41, 59, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-left: 4px solid transparent;
+            border-radius: 20px;
+            padding: 22px 35px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            animation: rowIn 0.4s ease forwards;
+        }
+
+        @keyframes rowIn {
+            from {
+                opacity: 0;
+                transform: translateY(12px)
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0)
+            }
+        }
+
+        .slot-row:hover {
+            transform: scale(1.008);
+            background: rgba(30, 41, 59, 0.65);
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+        }
+
+        .slot-row.available {
+            border-left-color: #10b981;
+        }
+
+        .slot-row.booked {
+            background: rgba(15, 23, 42, 0.7);
+            border-left-color: #ef4444;
+            border-color: rgba(239, 68, 68, 0.1);
+        }
+
+        .time-col {
+            display: flex;
+            align-items: center;
+            gap: 28px;
+        }
+
+        .slot-time {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #f8fafc;
+            letter-spacing: -0.5px;
+            min-width: 130px;
+        }
+
+        .slot-status {
+            font-size: 0.9rem;
+            font-weight: 700;
+            padding: 7px 16px;
+            border-radius: 30px;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+        }
+
+        .slot-row.available .slot-status {
+            color: #10b981;
+            background: rgba(16, 185, 129, 0.1);
+        }
+
+        .slot-row.booked .slot-status {
+            color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        /* Right column — who booked */
+        .booked-details {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            animation: slideR 0.5s ease forwards;
+        }
+
+        @keyframes slideR {
+            from {
+                opacity: 0;
+                transform: translateX(16px)
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0)
+            }
+        }
+
+        .booked-text {
+            text-align: right;
+        }
+
+        .booked-name {
+            font-weight: 600;
+            color: #f8fafc;
+            font-size: 1.3rem;
+        }
+
+        .booked-company {
+            color: #94a3b8;
+            font-size: 1rem;
+            margin-top: 3px;
+        }
+
+        .booked-avatar {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #ef4444, #f59e0b);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: 700;
+            font-size: 1.3rem;
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* ── Flash overlay for live sync ── */
+        #flashOverlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(168, 85, 247, 0.06);
+            pointer-events: none;
+            z-index: 50;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        /* ── Empty state ── */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #475569;
+            gap: 12px;
+        }
+
+        .empty-state .icon {
+            font-size: 3rem;
+        }
+
+        .empty-state p {
+            font-size: 1rem;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="retryBanner">⚠️ Relay unreachable — trying fallback peers… <span id="retryCount"></span></div>
+    <div id="flashOverlay"></div>
+
+    <!-- Sync pill -->
+    <div id="syncPill">
+        <div id="syncDot"></div>
+        <span id="syncLabel">Connecting…</span>
+    </div>
+    <div id="relayInfo">—</div>
+
+    <!-- Toast -->
+    <div id="toast"><span class="toast-icon" id="toastIcon">ℹ</span><span id="toastMsg">…</span></div>
+
+    <!-- BG -->
+    <div class="bg-shape shape1"></div>
+    <div class="bg-shape shape2"></div>
+    <div class="bg-shape shape3"></div>
+
+    <div class="container">
+        <div class="header-content">
+            <div>
+                <h1>Executive Schedule</h1>
+                <p style="color:#cbd5e1;font-size:1.2rem;margin-top:8px;font-weight:400;">
+                    Boardroom Alpha —
+                    <span id="displayDate" style="color:#94a3b8;"></span>
+                </p>
+            </div>
+            <div class="live-badge">
+                <div class="pulsing-dot"></div>
+                LIVE SYNC
+            </div>
+        </div>
+
+        <!-- Quick stats -->
+        <div class="stats-bar">
+            <div class="stat-chip total">📋 <span id="statTotal">0</span> Total</div>
+            <div class="stat-chip avail">✅ <span id="statAvail">0</span> Available</div>
+            <div class="stat-chip booked">🔴 <span id="statBooked">0</span> Booked</div>
+        </div>
+
+        <div class="slots-list" id="dashboardSlots">
+            <div class="empty-state">
+                <div class="icon">📡</div>
+                <p>Connecting to peers…</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ══════════════════════════════════════════════
+        //  GUN — same 5 community relays as booking.html
+        // ══════════════════════════════════════════════
+        const RELAYS = [
+            'https://gun-manhattan.herokuapp.com/gun',
+            'https://gunjs.herokuapp.com/gun',
+            'https://peer.wallie.io/gun',
+            'https://relay.peer.ooo/gun',
+            'https://gun-us.herokuapp.com/gun'
+        ];
+
+        const gun = Gun({ peers: RELAYS, localStorage: true, radisk: false });
+        const slotsRef = gun.get('syncspace_v2').get('boardroom_alpha');
+
+        // ── Relay health ──
+        let relayFailures = 0;
+        function updateSyncUI(state, label, relayUrl) {
+            const pill = document.getElementById('syncPill');
+            const lbl = document.getElementById('syncLabel');
+            const info = document.getElementById('relayInfo');
+            pill.className = state;
+            lbl.textContent = label;
+            if (relayUrl) {
+                const short = relayUrl.replace('https://', '').replace('/gun', '');
+                info.textContent = '↔ ' + short;
+            }
+        }
+
+        function checkRelay() {
+            let heard = false;
+            gun.get('syncspace_heartbeat').get('ping').put({ ts: Date.now() }, ack => {
+                if (!heard) {
+                    heard = true;
+                    relayFailures = 0;
+                    updateSyncUI('connected', 'Live Sync', RELAYS[0]);
+                    document.getElementById('retryBanner').style.display = 'none';
+                }
+            });
+            setTimeout(() => {
+                if (!heard) {
+                    relayFailures++;
+                    updateSyncUI('error', 'Reconnecting…', null);
+                    document.getElementById('retryBanner').style.display = 'block';
+                    document.getElementById('retryCount').textContent =
+                        `(relay ${Math.min(relayFailures + 1, RELAYS.length)}/${RELAYS.length})`;
+                }
+            }, 4000);
+        }
+        checkRelay();
+        setInterval(checkRelay, 15000);
+
+        // ── Toast ──
+        let toastTimer = null;
+        function showToast(msg, type = 'info') {
+            const icons = { success: '✓', error: '✕', warn: '⚠', info: 'ℹ' };
+            const t = document.getElementById('toast');
+            document.getElementById('toastMsg').textContent = msg;
+            document.getElementById('toastIcon').textContent = icons[type] || 'ℹ';
+            t.className = 'show';
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => { t.className = ''; }, 3500);
+        }
+
+        // ── Flash ──
+        function flash() {
+            const overlay = document.getElementById('flashOverlay');
+            overlay.style.opacity = '1';
+            setTimeout(() => { overlay.style.opacity = '0'; }, 250);
+        }
+
+        // ── Date ──
+        document.getElementById('displayDate').textContent = new Date().toLocaleDateString('en-GB', {
+            weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+        });
+
+        // ── Default slots (same seed as booking.html) ──
+        const DEFAULT_SLOTS = [
+            { id: 1, time: '09:00 AM', available: true, bookedBy: null, company: null },
+            { id: 2, time: '10:00 AM', available: true, bookedBy: null, company: null },
+            { id: 3, time: '11:00 AM', available: false, bookedBy: 'System', company: 'Maintenance' },
+            { id: 4, time: '12:00 PM', available: true, bookedBy: null, company: null },
+            { id: 5, time: '01:00 PM', available: true, bookedBy: null, company: null },
+            { id: 6, time: '02:00 PM', available: false, bookedBy: 'System', company: 'Maintenance' },
+            { id: 7, time: '03:00 PM', available: true, bookedBy: null, company: null },
+            { id: 8, time: '04:00 PM', available: true, bookedBy: null, company: null },
+            { id: 9, time: '05:00 PM', available: true, bookedBy: null, company: null }
+        ];
+
+        const LOCAL_KEY = 'syncspace_gun_slots';
+        let slots = [];
+
+        // ── Render ──
+        function renderSlots() {
+            const container = document.getElementById('dashboardSlots');
+
+            // Update stats
+            const avail = slots.filter(s => s.available).length;
+            const booked = slots.filter(s => !s.available).length;
+            document.getElementById('statTotal').textContent = slots.length;
+            document.getElementById('statAvail').textContent = avail;
+            document.getElementById('statBooked').textContent = booked;
+
+            container.innerHTML = '';
+
+            if (!slots.length) {
+                container.innerHTML = '<div class="empty-state"><div class="icon">📡</div><p>Waiting for data…</p></div>';
+                return;
+            }
+
+            slots.forEach((slot, i) => {
+                const row = document.createElement('div');
+                row.className = `slot-row ${slot.available ? 'available' : 'booked'}`;
+                row.style.animationDelay = (i * 40) + 'ms';
+
+                let inner = `
+            <div class="time-col">
+                <div class="slot-time">${slot.time}</div>
+                <div class="slot-status">${slot.available ? 'Available' : 'Booked'}</div>
+            </div>
+        `;
+
+                if (!slot.available && slot.bookedBy) {
+                    const initials = slot.bookedBy.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+                    inner += `
+                <div class="booked-details">
+                    <div class="booked-text">
+                        <div class="booked-name">${slot.bookedBy}</div>
+                        <div class="booked-company">${slot.company || ''}</div>
+                    </div>
+                    <div class="booked-avatar">${initials}</div>
+                </div>
+            `;
+                }
+
+                row.innerHTML = inner;
+                container.appendChild(row);
+            });
+        }
+
+        // ── Seed from local cache first ──
+        const cached = localStorage.getItem(LOCAL_KEY);
+        if (cached) {
+            try { slots = JSON.parse(cached); renderSlots(); } catch (e) { slots = [...DEFAULT_SLOTS]; renderSlots(); }
+        } else {
+            slots = [...DEFAULT_SLOTS]; renderSlots();
+        }
+
+        // ── Live GUN subscriptions ──
+        DEFAULT_SLOTS.forEach(def => {
+            slotsRef.get('slot_' + def.id).on(data => {
+                if (!data || !data.id) return;
+
+                const idx = slots.findIndex(s => s.id === data.id);
+                const updated = {
+                    id: data.id,
+                    time: data.time || def.time,
+                    available: data.available !== undefined ? data.available : def.available,
+                    bookedBy: data.bookedBy || null,
+                    company: data.company || null
+                };
+
+                let changed = false;
+                if (idx !== -1) {
+                    const was = JSON.stringify(slots[idx]);
+                    slots[idx] = updated;
+                    changed = JSON.stringify(updated) !== was;
+                } else {
+                    slots.push(updated);
+                    changed = true;
+                }
+
+                if (changed) {
+                    // Announce new bookings
+                    if (!updated.available && updated.bookedBy && updated.bookedBy !== 'System') {
+                        showToast(`${updated.time} booked by ${updated.bookedBy}`, 'warn');
+                    }
+                    localStorage.setItem(LOCAL_KEY, JSON.stringify(slots));
+                    flash();
+                    renderSlots();
+                }
+            });
+        });
+
+        // ── Hydrate with .once to force initial fetch ──
+        DEFAULT_SLOTS.forEach(def => {
+            slotsRef.get('slot_' + def.id).once(data => {
+                if (!data || !data.id) return;
+                const idx = slots.findIndex(s => s.id === data.id);
+                const updated = {
+                    id: data.id, time: data.time || def.time,
+                    available: data.available !== undefined ? data.available : def.available,
+                    bookedBy: data.bookedBy || null, company: data.company || null
+                };
+                if (idx !== -1) slots[idx] = updated;
+                else slots.push(updated);
+                localStorage.setItem(LOCAL_KEY, JSON.stringify(slots));
+                renderSlots();
+            });
+        });
+    </script>
+</body>
+
+</html>
