@@ -587,19 +587,15 @@
         ];
 
         const gun = Gun({
-            peers: RELAYS
+            peers: RELAYS,
+            localStorage: false,
+            radisk: false
         });
 
         const DB_ROOT = 'syncspace_v3';
         const slotsRef = gun.get(DB_ROOT).get('boardroom_alpha');
 
-        DEFAULT_SLOTS.forEach(slot => {
-            slotsRef.get('slot_' + slot.id).once(data => {
-                if (!data) {
-                    slotsRef.get('slot_' + slot.id).put(slot);
-                }
-            });
-        });
+
 
         // ── Connection monitoring via GUN's built-in events ──
         let isConnected = false;
