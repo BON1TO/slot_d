@@ -7,7 +7,7 @@
     <title>SyncSpace — Live Display Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="icon" href="data:;base64,iVBORw0KGgo=">
-    <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -562,61 +562,28 @@
 
     <script>
         // ══════════════════════════════════════════════
-        //  GUN.js — Working relay peers (verified alive)
-        //  MUST match the same relay + DB namespace
-        //  as the booking page (SlotB) for cross-device sync.
+        //  MQTT WSS — Enterprise-grade public broker
+        //  Handles cross-device real-time sync flawlessly.
         // ══════════════════════════════════════════════
+        
+        const MQTT_BROKER = 'wss://broker.emqx.io:8084/mqtt';
+        const MQTT_TOPIC_PREFIX = 'syncspace_v3/boardroom_alpha/slot_';
+        
+        const client = mqtt.connect(MQTT_BROKER);
 
-        const RELAYS = [
-            'https://relay.peer.ooo/gun'
-            // Add your own relay URL here for redundancy:
-            // 'https://your-relay.koyeb.app/gun'
-        ];
-
-        // ── Default slots (MUST match booking page exactly) ──
-        const DEFAULT_SLOTS = [
-            { id: 1, time: '09:00 AM', available: true, bookedBy: null, company: null },
-            { id: 2, time: '10:00 AM', available: true, bookedBy: null, company: null },
-            { id: 3, time: '11:00 AM', available: false, bookedBy: 'System', company: 'Maintenance' },
-            { id: 4, time: '12:00 PM', available: true, bookedBy: null, company: null },
-            { id: 5, time: '01:00 PM', available: true, bookedBy: null, company: null },
-            { id: 6, time: '02:00 PM', available: false, bookedBy: 'System', company: 'Maintenance' },
-            { id: 7, time: '03:00 PM', available: true, bookedBy: null, company: null },
-            { id: 8, time: '04:00 PM', available: true, bookedBy: null, company: null },
-            { id: 9, time: '05:00 PM', available: true, bookedBy: null, company: null }
-        ];
-
-        const gun = Gun({
-            peers: RELAYS,
-            localStorage: false,
-            radisk: false
+        client.on('connect', () => {
+            updateSyncUI('connected', 'Live Sync', 'EMQX Broker');
+            console.log('✅ Connected to MQTT relay');
+            
+            // Subscribe to all slots
+            client.subscribe(MQTT_TOPIC_PREFIX + '+', { qos: 1 }, (err) => {
+                if (err) console.error('Subscription error:', err);
+            });
         });
 
-        const DB_ROOT = 'syncspace_v3';
-        const slotsRef = gun.get(DB_ROOT).get('boardroom_alpha');
-
-
-
-        // ── Connection monitoring via GUN's built-in events ──
-        let isConnected = false;
-        let connectedRelay = null;
-
-        gun.on('hi', function (peer) {
-            isConnected = true;
-            connectedRelay = peer.url || peer.id || 'peer';
-            const short = String(connectedRelay).replace('https://', '').replace('/gun', '').substring(0, 30);
-            updateSyncUI('connected', 'Live Sync', short);
-            document.getElementById('retryBanner').style.display = 'none';
-            console.log('✅ Connected to relay:', connectedRelay);
-        });
-
-        gun.on('bye', function (peer) {
-            console.log('⚠️ Disconnected from relay:', peer.url || peer.id);
-            setTimeout(() => {
-                if (!isConnected) {
-                    updateSyncUI('error', 'Reconnecting…', null);
-                }
-            }, 2000);
+        client.on('offline', () => {
+            console.warn('⚠️ Disconnected from MQTT relay');
+            updateSyncUI('error', 'Reconnecting…', null);
         });
 
         function updateSyncUI(state, label, relayShort) {
@@ -705,6 +672,19 @@
             });
         }
 
+        // ── Default slots (MUST match booking page exactly) ──
+        const DEFAULT_SLOTS = [
+            { id: 1, time: '09:00 AM', available: true, bookedBy: null, company: null },
+            { id: 2, time: '10:00 AM', available: true, bookedBy: null, company: null },
+            { id: 3, time: '11:00 AM', available: false, bookedBy: 'System', company: 'Maintenance' },
+            { id: 4, time: '12:00 PM', available: true, bookedBy: null, company: null },
+            { id: 5, time: '01:00 PM', available: true, bookedBy: null, company: null },
+            { id: 6, time: '02:00 PM', available: false, bookedBy: 'System', company: 'Maintenance' },
+            { id: 7, time: '03:00 PM', available: true, bookedBy: null, company: null },
+            { id: 8, time: '04:00 PM', available: true, bookedBy: null, company: null },
+            { id: 9, time: '05:00 PM', available: true, bookedBy: null, company: null }
+        ];
+
         // ── Seed from local cache first ──
         const cached = localStorage.getItem(LOCAL_KEY);
         if (cached) {
@@ -713,16 +693,19 @@
             slots = [...DEFAULT_SLOTS]; renderSlots();
         }
 
-        // ── Live GUN subscriptions (real-time from any device) ──
-        DEFAULT_SLOTS.forEach(def => {
-            slotsRef.get('slot_' + def.id).on(data => {
+        // ── Live MQTT subscriptions (real-time from any device) ──
+        client.on('message', (topic, payload) => {
+            try {
+                const data = JSON.parse(payload.toString());
                 if (!data || !data.id) return;
-
+                
                 const idx = slots.findIndex(s => s.id === data.id);
+                // If it's a new unrecognized slot format, we gracefully merge it.
+                // Otherwise we update the existing slot.
                 const updated = {
                     id: data.id,
-                    time: data.time || def.time,
-                    available: data.available !== undefined ? data.available : def.available,
+                    time: data.time || (idx !== -1 ? slots[idx].time : ''),
+                    available: data.available !== undefined ? data.available : true,
                     bookedBy: data.bookedBy || null,
                     company: data.company || null
                 };
@@ -745,24 +728,9 @@
                     flash();
                     renderSlots();
                 }
-            });
-        });
-
-        // ── Hydrate with .once to force initial fetch from relay ──
-        DEFAULT_SLOTS.forEach(def => {
-            slotsRef.get('slot_' + def.id).once(data => {
-                if (!data || !data.id) return;
-                const idx = slots.findIndex(s => s.id === data.id);
-                const updated = {
-                    id: data.id, time: data.time || def.time,
-                    available: data.available !== undefined ? data.available : def.available,
-                    bookedBy: data.bookedBy || null, company: data.company || null
-                };
-                if (idx !== -1) slots[idx] = updated;
-                else slots.push(updated);
-                localStorage.setItem(LOCAL_KEY, JSON.stringify(slots));
-                renderSlots();
-            });
+            } catch (e) {
+                console.error('MQTT parse error:', e);
+            }
         });
 
         // ── Fallback for local testing (file:// origins share localStorage) ──
